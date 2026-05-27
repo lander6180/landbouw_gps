@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Landbouw GPS – Werkbreedte</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+  body { margin:0; font-family:Arial; background:#111; color:#eee; }
+  #map { height: 70vh; }
+  #panel { padding:1rem; background:#222; }
+  label { display:block; margin-top:0.5rem; }
+  button { padding:0.6rem 1rem; margin-top:0.5rem; font-size:1rem; }
+</style>
+</head>
+
+<body>
+
+<div id="map"></div>
+
+<div id="panel">
+  <label>Werkbreedte (m):</label>
+  <input id="width" type="number" value="3" min="1" step="0.1">
+
+  <button id="startBtn">Start eerste rij</button>
+  <button id="resetBtn">Reset</button>
+
+  <p id="status">Status: wacht op GPS…</p>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+let map = L.map('map').setView([50.9, 2.7], 17);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 20
+}).addTo(map);
+
+let gpsMarker = null;
+let refPoint = null;
+let headingVector = null;
+let linesLayer = L.layerGroup().addTo(map);
+let positions = [];
+
+function toRad(d){ return d*Math.PI/180; }
+
+function computeHeading(p1, p2){
+  let lat1 = toRad(p1.lat), lat2 = toRad(p2.lat);
+  let dLon = toRad(p2.lng - p1.lng);
+  let y = Math.sin(dLon) * Math.cos(lat2);
+  let x = Math.cos(lat1)*Math.sin(lat2) -
+          Math.sin(lat1)*Math.cos(lat2)*Math.cos(dLon);
+  return Math.atan2(y, x);
+}
+
+function offsetPoint(lat, lon, dx, dy){
+  const R = 6378137;
+  let newLat = lat + (dy / R) * (180/Math.PI);
+  let newLon = lon + (dx / (R * Math.cos(toRad(lat)))) * (180/Math.PI);
+  return [newLat, newLon];
+}
+
+function drawLines(){
+  linesLayer.clearLayers();
+  if(!refPoint || !headingVector) return;
+
+  let width = parseFloat(document.getElementById("width").value);
+  let angle = headingVector;
+
+  for(let i=-10; i<=10; i++){
+    let offset = i * width;
+    let dx = Math.sin(angle + Math.PI/2) * offset;
+    let dy = Math.cos(angle + Math.PI/2) * offset;
+
+    let p1 = offsetPoint(refPoint.lat, refPoint.lng, dx, dy);
+    let p2 = offsetPoint(refPoint.lat, refPoint.lng, dx + 200*Math.sin(angle),
+                         dy + 200*Math.cos(angle));
+
+    L.polyline([p1, p2], {color: i===0 ? 'yellow' : '#0f0'}).addTo(linesLayer);
+  }
+}
+
+document.getElementById("startBtn").onclick = () => {
+  if(positions.length < 2){
+    alert("Rij eerst enkele meters zodat ik je richting kan bepalen.");
+    return;
+  }
+  refPoint = positions[0];
+  headingVector = computeHeading(positions[0], positions[positions.length-1]);
+  drawLines();
+  document.getElementById("status").textContent = "Referentielijn ingesteld.";
+};
+
+document.getElementById("resetBtn").onclick = () => {
+  positions = [];
+  refPoint = null;
+  headingVector = null;
+  linesLayer.clearLayers();
+  document.getElementById("status").textContent = "Gerest.";
+};
+
+navigator.geolocation.watchPosition(pos => {
+  let lat = pos.coords.latitude;
+  let lon = pos.coords.longitude;
+
+  if(!gpsMarker){
+    gpsMarker = L.marker([lat, lon]).addTo(map);
+  } else {
+    gpsMarker.setLatLng([lat, lon]);
+  }
+
+  positions.push({lat, lng:lon});
+  if(positions.length > 50) positions.shift();
+
+  document.getElementById("status").textContent =
+    `GPS: ${lat.toFixed(6)}, ${lon.toFixed(6)}, nauwkeurigheid ±${pos.coords.accuracy.toFixed(1)} m`;
+
+}, err => {
+  document.getElementById("status").textContent = "GPS fout: " + err.message;
+}, {enableHighAccuracy:true});
+</script>
+
+</body>
+</html>
